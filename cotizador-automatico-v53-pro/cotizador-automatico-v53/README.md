@@ -25,6 +25,73 @@ npm run build
 npm run preview
 ```
 
+## ☁️ Despliegue en AWS S3
+
+El proyecto incluye infraestructura y automatización para publicarlo como
+sitio estático en **Amazon S3** (opcionalmente con **CloudFront + HTTPS**).
+
+### Archivos relevantes
+
+| Archivo                               | Propósito                                           |
+| ------------------------------------- | --------------------------------------------------- |
+| `infrastructure/s3-static-site.yml`   | CloudFormation: bucket S3 + policy + CloudFront     |
+| `infrastructure/README.md`            | Guía de provisión del stack                         |
+| `scripts/deploy-s3.sh`                | Deploy manual con AWS CLI                           |
+| `.github/workflows/deploy-s3.yml`     | CI/CD: build + sync a S3 + invalidación CloudFront  |
+
+### 1) Provisionar infraestructura (una sola vez)
+
+```bash
+aws cloudformation create-stack \
+  --stack-name cotizador-v53-pro \
+  --template-body file://infrastructure/s3-static-site.yml \
+  --parameters \
+      ParameterKey=BucketName,ParameterValue=cotizador-v53-pro-prod \
+      ParameterKey=EnableCloudFront,ParameterValue=true \
+  --region us-east-1
+
+aws cloudformation wait stack-create-complete \
+  --stack-name cotizador-v53-pro --region us-east-1
+
+aws cloudformation describe-stacks \
+  --stack-name cotizador-v53-pro \
+  --query 'Stacks[0].Outputs' --region us-east-1
+```
+
+### 2) Despliegue manual
+
+```bash
+S3_BUCKET=cotizador-v53-pro-prod \
+AWS_REGION=us-east-1 \
+CLOUDFRONT_DISTRIBUTION_ID=E123ABCDEF \
+./scripts/deploy-s3.sh
+```
+
+El script:
+1. Instala dependencias y ejecuta `npm run build`.
+2. Sincroniza assets hash-eados a S3 con `Cache-Control: immutable`.
+3. Sube `index.html` sin cache (`must-revalidate`).
+4. Invalida CloudFront (`/*`) si se proveyó el distribution ID.
+
+### 3) Despliegue automático (GitHub Actions)
+
+El workflow `.github/workflows/deploy-s3.yml` se dispara en push a `main`
+y usa **OIDC** (sin claves estáticas). Configurar en el repositorio:
+
+**Secrets**
+- `AWS_DEPLOY_ROLE_ARN` — rol IAM con `sts:AssumeRoleWithWebIdentity`
+  confiando en `token.actions.githubusercontent.com`.
+
+**Variables**
+- `AWS_REGION` (ej. `us-east-1`)
+- `S3_BUCKET` (ej. `cotizador-v53-pro-prod`)
+- `CLOUDFRONT_DISTRIBUTION_ID` (opcional)
+
+El rol IAM necesita permisos sobre:
+`s3:ListBucket`, `s3:GetObject`, `s3:PutObject`, `s3:DeleteObject` en el bucket,
+y `cloudfront:CreateInvalidation` sobre la distribución.
+
+
 ## 🗂️ Estructura del Proyecto
 
 ```
