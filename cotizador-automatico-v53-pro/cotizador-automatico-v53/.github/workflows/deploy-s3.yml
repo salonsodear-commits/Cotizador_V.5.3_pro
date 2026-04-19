@@ -1,0 +1,94 @@
+name: Deploy Cotizador V5.3 PRO to S3
+
+on:
+  push:
+    branches:
+      - main
+      - claude/deploy-quoter-s3-PU85u
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Entorno destino
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+
+concurrency:
+  group: deploy-s3-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '20'
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  S3_BUCKET: ${{ vars.S3_BUCKET }}
+  CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+  PROJECT_DIR: cotizador-automatico-v53-pro/cotizador-automatico-v53
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ env.PROJECT_DIR }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: npm ci || npm install
+
+      - name: Build production bundle
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync build to S3 (hashed assets, long cache)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          aws s3 sync dist/ s3://${S3_BUCKET}/ \
+            --delete \
+            --exclude "index.html" \
+            --exclude "*.html" \
+            --cache-control "public,max-age=31536000,immutable"
+
+      - name: Sync HTML entry points (no cache)
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          aws s3 sync dist/ s3://${S3_BUCKET}/ \
+            --exclude "*" \
+            --include "*.html" \
+            --cache-control "public,max-age=0,must-revalidate" \
+            --content-type "text/html; charset=utf-8"
+
+      - name: Invalidate CloudFront cache
+        if: env.CLOUDFRONT_DISTRIBUTION_ID != ''
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${CLOUDFRONT_DISTRIBUTION_ID}" \
+            --paths "/*"
+
+      - name: Summary
+        run: |
+          echo "### Deploy completado" >> $GITHUB_STEP_SUMMARY
+          echo "- Bucket: \`${S3_BUCKET}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Región: \`${AWS_REGION}\`" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${CLOUDFRONT_DISTRIBUTION_ID}" ]; then
+            echo "- CloudFront: \`${CLOUDFRONT_DISTRIBUTION_ID}\` (invalidación /*)" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Static website hosting for Cotizador Automático V5.3 PRO.
+  Provisions an S3 bucket configured for public static hosting and an optional
+  CloudFront distribution with HTTPS for production-grade delivery.
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Globally unique S3 bucket name (e.g. cotizador-v53-pro-prod)
+    AllowedPattern: '^[a-z0-9][a-z0-9\-]{1,61}[a-z0-9]$'
+
+  EnableCloudFront:
+    Type: String
+    Description: Create a CloudFront distribution in front of the bucket
+    AllowedValues: ['true', 'false']
+    Default: 'true'
+
+  IndexDocument:
+    Type: String
+    Default: index.html
+
+  ErrorDocument:
+    Type: String
+    Default: index.html
+
+Conditions:
+  WithCloudFront: !Equals [!Ref EnableCloudFront, 'true']
+
+Resources:
+  SiteBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: false
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: false
+      WebsiteConfiguration:
+        IndexDocument: !Ref IndexDocument
+        ErrorDocument: !Ref ErrorDocument
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [GET, HEAD]
+            AllowedOrigins: ['*']
+            AllowedHeaders: ['*']
+            MaxAge: 3000
+
+  SiteBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref SiteBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PublicReadForWebsite
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub arn:aws:s3:::${SiteBucket}/*
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: WithCloudFront
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'Cotizador V5.3 PRO - ${BucketName}'
+        DefaultRootObject: !Ref IndexDocument
+        PriceClass: PriceClass_100
+        HttpVersion: http2
+        Origins:
+          - Id: S3WebsiteOrigin
+            DomainName: !Select [2, !Split ['/', !GetAtt SiteBucket.WebsiteURL]]
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+              HTTPPort: 80
+        DefaultCacheBehavior:
+          TargetOriginId: S3WebsiteOrigin
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+          MinTTL: 0
+          DefaultTTL: 3600
+          MaxTTL: 86400
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: !Sub '/${IndexDocument}'
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: !Sub '/${IndexDocument}'
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+Outputs:
+  BucketName:
+    Description: Nombre del bucket S3
+    Value: !Ref SiteBucket
+
+  WebsiteURL:
+    Description: URL del sitio estático S3
+    Value: !GetAtt SiteBucket.WebsiteURL
+
+  CloudFrontURL:
+    Condition: WithCloudFront
+    Description: URL HTTPS de CloudFront
+    Value: !Sub https://${CloudFrontDistribution.DomainName}
+
+  CloudFrontDistributionId:
+    Condition: WithCloudFront
+    Description: ID de la distribución (para invalidaciones)
+    Value: !Ref CloudFrontDistribution
