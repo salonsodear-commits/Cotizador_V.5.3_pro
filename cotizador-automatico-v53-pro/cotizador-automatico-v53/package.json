@@ -7,10 +7,13 @@
   "author": "Sistema de Cotización",
   "license": "MIT",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "npm run data:build && vite",
+    "build": "npm run data:build && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "data:build": "node scripts/excel-to-json.mjs",
+    "data:watch": "node scripts/excel-to-json.mjs --watch",
+    "docs:pdf": "python3 scripts/build-guide-pdf.py"
   },
   "dependencies": {
     "react": "^18.2.0",

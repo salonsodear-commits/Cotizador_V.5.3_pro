@@ -1,0 +1,17 @@
+[
+  {
+    "codigo": "UOM",
+    "nombre": "Metalúrgico",
+    "precio_hora": 5400
+  },
+  {
+    "codigo": "SMATA",
+    "nombre": "Automotriz",
+    "precio_hora": 5800
+  },
+  {
+    "codigo": "UOCRA",
+    "nombre": "Construcción",
+    "precio_hora": 5200
+  }
+]
